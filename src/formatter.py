@@ -373,10 +373,44 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
         pPr = p._element.get_or_add_pPr()
         has_auto_num = pPr.find(qn('w:numPr')) is not None
 
+        # 标题专用清理与规范：避免 1.2. 这种有末尾点的，并标准化空隙
+        if ptype in ["heading_1", "heading_2", "heading_3"]:
+            # 严格匹配阿拉伯数字编号 (支持 1, 1.1, 1.1.1 等)
+            match = re.match(r'^(\d+(?:\.\d+)*)([\.．、\s]+)(.*)$', text_strip)
+            if match:
+                num = match.group(1).rstrip('.')  # 确保 1.2. 变成 1.2
+                title_text = match.group(3).strip()
+                p.text = f"{num}\t{title_text}"  # 覆盖文本，利用 tab 制表位彻底精准控制标题间隙
+                text_strip = p.text.strip()
+                
+            # 清除可能存在的自动编号绑定，全转为纯文本，防止 Word 自己乱加间距
+            numPr = pPr.find(qn('w:numPr'))
+            if numPr is not None:
+                pPr.remove(numPr)
+                has_auto_num = False
+            is_manual_list = False  # 标题独立逻辑，不用正文的挂行列表逻辑
+
         # 缩进控制：优先处理参考文献格式
         if ptype == "reference":
             p.paragraph_format.left_indent = Pt(24)   # 约设为2字符的悬挂间距
             p.paragraph_format.first_line_indent = Pt(-24)
+        elif ptype in ["heading_1", "heading_2", "heading_3"]:
+            # 标题：第一行顶格，长标题基于前面的数字挂行对齐
+            match = re.match(r'^([\d\.]+)\t(.*)$', text_strip)
+            if match:
+                num = match.group(1)
+                # 动态计算悬挂缩进宽度: "1." 约24磅, "1.1" 约32磅, "1.1.1" 约40磅
+                indent_pt = len(num) * 6 + 14 
+                p.paragraph_format.left_indent = Pt(indent_pt)
+                p.paragraph_format.first_line_indent = Pt(-indent_pt)
+                # 添加强制制表位保证间隙精确贴合
+                try:
+                    p.paragraph_format.tab_stops.add_tab_stop(Pt(indent_pt))
+                except:
+                    pass
+            else:
+                p.paragraph_format.left_indent = Pt(0)
+                p.paragraph_format.first_line_indent = Pt(0)
         elif current_config.get("first_line_indent"):
             if is_manual_list or has_auto_num:
                 # 学术论文规范的列表缩进（标准悬挂缩进）：
