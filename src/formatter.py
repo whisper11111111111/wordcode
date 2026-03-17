@@ -362,25 +362,68 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
         elif ptype == "heading_3":
             set_outline_lvl(p, 2)
 
+        import re
+        is_list = False
+        # 识别以序号、分点符号开头的段落，不进行不自然的首行缩进
+        if re.match(r'^(\d+[\.\、\)]|[\(（]\d+[\)）]|[①-⑩]|\-|•|·)', p.text.strip()):
+            is_list = True
+
         # 应用缩进 (简单处理为首行缩进 2 字符，这在学术排版非常常见)
-        if current_config.get("first_line_indent"):
+        if current_config.get("first_line_indent") and not is_list:
             p.paragraph_format.first_line_indent = Pt(28) # 估算 24-28 pt，约等于2个汉字默认宽度
+        elif is_list:
+            p.paragraph_format.first_line_indent = Pt(0) # 消除奇怪的首行缩进
+            
+        # 如果是参考文献，不论是否带有编号，都强制为其设定悬挂缩进（左缩进 + 负首行缩进）
+        if ptype == "reference":
+            p.paragraph_format.left_indent = Pt(24)   # 约设为2字符的悬挂间距
+            p.paragraph_format.first_line_indent = Pt(-24)
             
         # 遍历段落的每一个文字块应用样式
-        for run in p.runs:
+        # 由于在遍历过程中我们可能会修改 p.runs，所以这里要取出原始的 runs 列表副本
+        original_runs = list(p.runs)
+        for run in original_runs:
+            text = run.text
+            
+            # 正文中的引文上标处理，例如 [1], [1,2], [1-3]
+            if ptype != "reference" and re.search(r'\[\d+(?:[,\-]\d+)*\]', text):
+                from docx.oxml.ns import qn
+                parts = re.split(r'(\[\d+(?:[,\-]\d+)*\])', text)
+                if len(parts) > 1:
+                    r = run._r
+                    parent = r.getparent()
+                    if parent is not None:
+                        idx = parent.index(r)
+                        parent.remove(r)  # 移除原先的 run
+                        
+                        for part in parts:
+                            if not part: continue
+                            new_run = p.add_run(part)
+                            new_r = new_run._r
+                            # 改变插入位置，使其替换原来的 run
+                            try:
+                                p._p.remove(new_r)
+                            except ValueError:
+                                pass
+                            parent.insert(idx, new_r)
+                            idx += 1
+                            
+                            # 应用基础样式
+                            apply_style(new_run, p, current_config)
+                            
+                            # 若匹配文献格式，将其上标并专门设为 Times New Roman
+                            if re.match(r'^\[\d+(?:[,\-]\d+)*\]$', part):
+                                new_run.font.superscript = True
+                                new_run.font.name = "Times New Roman"
+                                new_run._element.rPr.rFonts.set(qn('w:ascii'), "Times New Roman")
+                                new_run._element.rPr.rFonts.set(qn('w:hAnsi'), "Times New Roman")
+                    continue
+            
+            # 正常处理不需要切分的 run
             # 去除原有的强格式覆盖
             run.font.name = None
             run.font.size = None
             apply_style(run, p, current_config)
-            
-            # 兼容参考文献的“上标”要求 (简单正则匹配：如果run里刚好只有或者包含 "[数字]")
-            if ptype == "reference" and "[" in run.text and "]" in run.text and len(run.text) < 6:
-                pass # NOTE: 完全彻底处理上标非常麻烦，通常引用的 [1] 只是普通文本。
-            # 如果是正文里的上标标注，简单尝试把带有独立中括号数字的文字块加上标
-            if ptype == "body":
-                import re
-                if re.fullmatch(r'^\[\d+\]$', run.text.strip()):
-                    run.font.superscript = True
 
     # 插入目录 (如果选项开启)
     if generate_toc:
