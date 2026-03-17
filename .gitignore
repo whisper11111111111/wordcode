@@ -1,0 +1,39 @@
+# 忽略常见的环境、缓存、临时和编译文件
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+env/
+venv/
+venv*/
+.venv/
+.venv*/
+ENV/
+env.bak/
+venv.bak/
+
+# 环境变量文件 (绝对不能提交包含真实密钥的文件)
+.env
+
+# 虚拟环境相关
+pip-log.txt
+pip-delete-this-directory.txt
+
+# VSCode 及其他编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志文件
+*.log
+
+# 项目输出 (为了防止误传临时生成的 Word 文档)
+*_formatted.docx
+test*.docx
+output/
+
+# macOS
+.DS_Store
