@@ -432,12 +432,16 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
         # 遍历段落的每一个文字块应用样式
         # 由于在遍历过程中我们可能会修改 p.runs，所以这里要取出原始的 runs 列表副本
         original_runs = list(p.runs)
-        for run in original_runs:
+        for idx, run in enumerate(original_runs):
             # 清理手动列表中的多制表符和连续空格，解决人工录入排版导致的“空得太开”
             if is_manual_list:
                 if '\t' in run.text:
                     run.text = run.text.replace('\t', ' ')
                 run.text = re.sub(r' {2,}', ' ', run.text)
+                
+                # 确保标号后有一个且仅有一个空格（不论原先是否紧贴）
+                if idx == 0:
+                    run.text = re.sub(r'^\s*(\d+[\.\、\)]|[\(（]\d+[\)）]|[①-⑩]|\-|•|·)\s*', r'\1 ', run.text)
 
             text = run.text
             
