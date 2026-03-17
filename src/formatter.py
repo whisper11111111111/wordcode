@@ -363,26 +363,48 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
             set_outline_lvl(p, 2)
 
         import re
-        is_list = False
-        # 识别以序号、分点符号开头的段落，不进行不自然的首行缩进
-        if re.match(r'^(\d+[\.\、\)]|[\(（]\d+[\)）]|[①-⑩]|\-|•|·)', p.text.strip()):
-            is_list = True
+        is_manual_list = False
+        text_strip = p.text.strip()
+        # 识别以序号、分点符号开头的段落
+        if re.match(r'^(\d+[\.\、\)]|[\(（]\d+[\)）]|[①-⑩]|\-|•|·)', text_strip):
+            is_manual_list = True
 
-        # 应用缩进 (简单处理为首行缩进 2 字符，这在学术排版非常常见)
-        if current_config.get("first_line_indent") and not is_list:
-            p.paragraph_format.first_line_indent = Pt(28) # 估算 24-28 pt，约等于2个汉字默认宽度
-        elif is_list:
-            p.paragraph_format.first_line_indent = Pt(0) # 消除奇怪的首行缩进
-            
-        # 如果是参考文献，不论是否带有编号，都强制为其设定悬挂缩进（左缩进 + 负首行缩进）
+        from docx.oxml.ns import qn
+        pPr = p._element.get_or_add_pPr()
+        has_auto_num = pPr.find(qn('w:numPr')) is not None
+
+        # 缩进控制：优先处理参考文献格式
         if ptype == "reference":
             p.paragraph_format.left_indent = Pt(24)   # 约设为2字符的悬挂间距
             p.paragraph_format.first_line_indent = Pt(-24)
+        elif current_config.get("first_line_indent"):
+            if is_manual_list or has_auto_num:
+                # 学术论文规范的列表缩进（标准悬挂缩进）：
+                # 标号起于首行 2 字符处 (28pt)，次行文字对齐标号后的文本位置 (约 45pt)
+                p.paragraph_format.left_indent = Pt(45)
+                p.paragraph_format.first_line_indent = Pt(-17)
+                # 添加强制制表位，防止自动编号和制表符导致的大距“跳崖式”空位
+                try:
+                    p.paragraph_format.tab_stops.add_tab_stop(Pt(45))
+                except:
+                    pass
+            else:
+                p.paragraph_format.left_indent = Pt(0)
+                p.paragraph_format.first_line_indent = Pt(28) # 估算 24-28 pt，约等于2个汉字默认宽度
+        else:
+            p.paragraph_format.left_indent = Pt(0)
+            p.paragraph_format.first_line_indent = Pt(0)
             
         # 遍历段落的每一个文字块应用样式
         # 由于在遍历过程中我们可能会修改 p.runs，所以这里要取出原始的 runs 列表副本
         original_runs = list(p.runs)
         for run in original_runs:
+            # 清理手动列表中的多制表符和连续空格，解决人工录入排版导致的“空得太开”
+            if is_manual_list:
+                if '\t' in run.text:
+                    run.text = run.text.replace('\t', ' ')
+                run.text = re.sub(r' {2,}', ' ', run.text)
+
             text = run.text
             
             # 正文中的引文上标处理，例如 [1], [1,2], [1-3]
