@@ -4,6 +4,25 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 import json
 
+def is_toc_paragraph(p):
+    """判断一个段落是否属于原有目录的一部分"""
+    try:
+        style_name = p.style.name.lower() if p.style and p.style.name else ""
+        if "toc" in style_name or "目录" in style_name:
+            return True
+    except:
+        pass
+        
+    try:
+        # 判断是否含有 TOC 域代码（针对纯域代码生成的目录开头）
+        xml_str = p._p.xml
+        if 'w:instrText' in xml_str and 'TOC' in xml_str:
+            return True
+    except:
+        pass
+        
+    return False
+
 def apply_style(run, paragraph, config):
     """
     根据配置为一个Run(文字块)和一个段落应用样式
@@ -73,6 +92,8 @@ def extract_paragraphs_text(input_path):
     doc = docx.Document(input_path)
     data = []
     for i, p in enumerate(doc.paragraphs):
+        if is_toc_paragraph(p):
+            continue
         text = p.text.strip()
         if text:
             data.append({"idx": i, "text": text})
@@ -169,6 +190,41 @@ def add_toc_at_index(doc, paragraph_idx):
     
     # 把结束符加在提示文字后面
     run3._r.append(fldChar3)
+    
+    # 将目录包裹在标准的 Word 目录组件 (SDT) 中，使其成为原生可点击更新的目录块
+    sdt = OxmlElement('w:sdt')
+    sdtPr = OxmlElement('w:sdtPr')
+    docPartObj = OxmlElement('w:docPartObj')
+    docPartGallery = OxmlElement('w:docPartGallery')
+    docPartGallery.set(qn('w:val'), 'Table of Contents')
+    docPartUnique = OxmlElement('w:docPartUnique')
+    docPartObj.append(docPartGallery)
+    docPartObj.append(docPartUnique)
+    sdtPr.append(docPartObj)
+    sdt.append(sdtPr)
+
+    sdtEndPr = OxmlElement('w:sdtEndPr')
+    sdt.append(sdtEndPr)
+
+    sdtContent = OxmlElement('w:sdtContent')
+    
+    # 将 sdt 插入到 toc_title_p 之前
+    toc_title_p._p.addprevious(sdt)
+    
+    # lxml 的 append 会将节点从原父级移动到新父级
+    sdtContent.append(toc_title_p._p)
+    sdtContent.append(toc_p._p)
+    sdt.append(sdtContent)
+
+    # 尝试设置文档打开时自动更新域（包括自动拉取最新目录排版）
+    try:
+        settings_element = doc.settings.element
+        if not settings_element.xpath('.//w:updateFields'):
+            update_fields = OxmlElement('w:updateFields')
+            update_fields.set(qn('w:val'), 'true')
+            settings_element.append(update_fields)
+    except Exception:
+        pass
     
     # 增加分节符 (替换原来的分页符)，从而可以独立设置正文的页码
     pPr = page_break_p._p.get_or_add_pPr()
@@ -343,8 +399,7 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
     toc_insert_idx = 0  # 目录始终插入在文档最前方
     
     for i, p in enumerate(doc.paragraphs):
-        text = p.text.strip()
-        if not text:
+        if is_toc_paragraph(p):
             continue
             
         # 从 AI 分类结果中获取当前段落类型，默认为正文
