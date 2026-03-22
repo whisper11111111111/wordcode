@@ -401,7 +401,11 @@ def process_document(input_path, output_path, format_config, paragraph_types, ge
     for i, p in enumerate(doc.paragraphs):
         if is_toc_paragraph(p):
             continue
-            
+
+        text = p.text.strip()
+        if not text:
+            continue
+
         # 从 AI 分类结果中获取当前段落类型，默认为正文
         ptype = paragraph_types.get(str(i), "body")
         
